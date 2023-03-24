@@ -1,0 +1,451 @@
+---
+title: "Uthealth Fetal Center Data Exercise"
+author: "Sandeep Kumar Yedla"
+date: "2/18/2023"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+## Introduction:
+
+This script is designed to help users better understand the Fetal Center Data, which is stored in two datasets: 'test_data.csv' and 'test_practice_database.csv'. The former contains information about referring doctor ID, date of referral, and various medical procedures that doctors have applied to patients. The latter provides additional data about the doctors, including their locations (state and geographical area).
+
+The script is organized to facilitate data loading, cleaning, manipulation, and wrangling, as well as exploratory data analysis. It includes comments to guide users with varying levels of technical expertise and to make the analysis more accessible to individuals in clinical research labs.
+
+### Including Libraries
+
+```{r}
+# Install if the packages are not available on local environment
+# install.packages("readr")
+#install.packages("tidyr")
+#install.packages("lubridate")
+#install.packages("plotly")
+#install.packages("knitr")
+#install.packages("writexl")
+#install.packages("ggplot2")
+#install.packages("openxlsx")
+#install.packages("xts")
+#install.packages("highcharter")
+#install.packages('orca')
+
+# Loading required packages 
+library(readr)
+library(tidyr)
+library(dplyr)
+library(lubridate)
+library(plotly)
+library(knitr)
+library(writexl)
+library(ggplot2)
+library(openxlsx)
+#library(orca)
+
+library(xts)
+require(highcharter) 
+library(stringr)
+```
+
+```{r}
+#setting the environment in R-Studio
+setwd("~/Desktop/UThealth_Data_Excercise")
+
+# Read the data with read.csv()
+test_data <- read.csv("test_data.csv")
+test_practice_db <- read_csv('test_practice_database.csv', show_col_types = FALSE)
+head(test_data,3)
+head(test_practice_db,3)
+```
+
+### Data Cleaning and Processing
+
+```{r}
+# counting the unique values in each column
+test_data_uniq_count<-sapply(test_data, function(x) n_distinct(x, na.rm = TRUE))
+test_data_uniq_count
+```
+
+The dataset contains 2,412 observations of patient information with 1,820 unique demo_id. This implies that there are multiple rows with information for each patient.
+
+```{r}
+# calculate the number of missing values in each column
+missing_count <- colSums(is.na(test_data))
+
+# convert the output to a data frame
+missing_df <- as.data.frame(missing_count)
+missing_df
+
+#-----------
+
+# calculate the number of missing values in each column
+missing_count2 <- colSums(is.na(test_practice_db))
+
+# convert the output to a data frame
+missing_df2 <- as.data.frame(missing_count2)
+missing_df2
+
+```
+
+Based on the initial analysis of the test_data dataset, it can be observed that there are 605 missing observations for referal_doctors. However, it is important to note that each patient may have one or several different rows in the dataset, meaning that some of the missing values may not actually be missing data, but rather represent a different row for the same patient. Therefore, it is necessary to further explore the dataset and carefully consider the relationship between the observations for each patient when addressing the missing data.
+
+
+To check the demo_id with multiple rows of patient information with redcap_event_name: demographic_data_arm_1 or operative_data_arm_1 
+
+```{r}
+# T0 check on multiple demo_id and redcap_event_name
+demo_id_sub <- test_data %>%
+  group_by(demo_id) %>%
+  filter(n() > 1) %>%
+  arrange(demo_id) %>%
+  select(demo_id, redcap_event_name)
+head(demo_id_sub,10)
+```
+
+
+Demo_id and redcap_event_name: demographic_data_arm_1 to fill in the respective reference_doc_id looking for the ref_doc_id from the nearest value.
+
+```{r}
+## To fill the missing demo_ref_doc based on the demo_id 
+
+test_data <- test_data %>%
+          group_by(demo_id) %>%
+          fill(demo_ref_doc, .direction = "updown")
+
+```
+
+Based on the demo_id, the ref_doctor information can be pulled from the rows which has the patient consultation information.
+
+Changing the name from 'prodcure_minor' to 'procedure_minor'
+
+```{r}
+# For ("minor_proc") minor needle based procedure, column name needs to be corrected from 
+# "prodcure_minor" from "procedure_minor"
+names(test_data)[names(test_data) == "prodcure_minor"] <- "procedure_minor"
+```
+
+
+```{r}
+# checking the data after filling the Reference doctor id(demo_ref_doc)  
+# calculate the number of missing values in each column
+missing_count3 <- colSums(is.na(test_data))
+
+# convert the output to a data frame
+missing_df3 <- as.data.frame(missing_count3)
+missing_df3
+```
+
+
+```{r}
+# To work with test_practice_db which has doctor location information 
+# it should be joined with test_data (left_join preferably to have all test_data information)
+df_joined <- left_join(test_data, test_practice_db, by = c("demo_ref_doc" = "ref_practice_doc"))
+head(df_joined,n=4)
+```
+
+
+```{r}
+
+# Convert the date columns to proper date format
+df_joined$demo_exam_date <- ymd(df_joined$demo_exam_date)
+
+# Create a new column for the month of the exam
+df_joined$month <- month(ymd(df_joined$demo_exam_date))
+
+# Have the month name abbrevation (1-Jan, 2-Feb) easy to read and for furthur use
+df_joined$month_name <- month.abb[df_joined$month]
+
+
+# Reorder columns for better representation of data
+df_joined <- select(df_joined, demo_id,record, demo_ref_doc, ref_state,ref_geo_area,
+            demo_exam_date, month,month_name,redcap_event_name,redcap_repeat_instrument,redcap_repeat_instance,
+                    procedure_ntd,procedure_iut,procedure_minor,procedure_laser,procedure_vasa_previa,procedure_bipolar_rfa,procedure_chorioangioma,procedure_abs,procedure_shunt,procedure_exit,procedure_feto)
+
+
+
+# View the attributes after combining the test_data and test_practice_database
+names(df_joined)
+
+
+```
+
+
+
+
+```{r}
+#Uncomment to generate Combined table
+#write.csv(df_joined, file = "df_joined.csv", row.names = FALSE)
+```
+
+## Explorartory Data Analysis
+
+```{r}
+# Applying filter condition to separate data frames with state values: 8 
+geo_area_8  <- df_joined %>% 
+              filter(ref_state == 8, redcap_event_name == "demographic_data_arm_1")
+
+# Filtering out rest of the data without state: 8
+geo_without_8 <- df_joined %>% 
+                  filter(ref_state != 8, redcap_event_name == "demographic_data_arm_1")
+
+
+```
+
+### Excercise 1: Stacked bar plot faceted by the state where the referral came from (ref_state:8)
+
+
+```{r}
+library(ggplot2)
+
+# Factor conversion of month
+geo_area_8$month <- as.factor(geo_area_8$month)
+
+# choosing colors manually for better visuals and overiding the default colors
+my_colors <- c("#9b59b6", "#3498db", "#95a5a6", "#e74c3c", "#34495e", "#2ecc71", "#f1c40f", "#e67e22", "#16a085", "#8e44ad", "#1abc9c", "#f39c12", "#c0392b", "#bdc3c7", "#7f8c8d")
+
+# create the plot
+p<-ggplot(geo_area_8, aes(x = month, fill = ref_geo_area)) + 
+  geom_bar(position = "stack") +
+  labs(x = "Month", y = "Patient Referrals Count")+
+  scale_fill_manual(values = my_colors)+
+  ggtitle(" 2022 Fetal Center Patient Referrals for State 8 and Regions over Months ")
+
+
+# using plotly library for plot
+
+ggplotly(p)
+
+# Saving the image in Plots folder
+ggsave("Outputs/plots/Staked_barchart_state_8.png", plot = p, width = 12, height = 8, units = "in")
+```
+
+Plot Description: The plot displays the count of patient referrals made by referring doctors in different states and geographical areas during the year 2022. State 8 and geographical area 8_16, represented by the orange region, had the highest number of referrals. The number of referrals ranged from a minimum of 94 in February to a maximum of 193 in August.
+
+
+```{r}
+# Handling missing values for plot It can be inco-orporated if needed
+geo_without_8 <- geo_without_8[complete.cases(geo_without_8$ref_geo_area), ]
+
+```
+
+### Histogram for rest of the states without State: 8
+
+```{r}
+
+# Plot histograms with facets
+p<-ggplot(geo_without_8, aes(x = month, fill = ref_geo_area)) +
+  geom_histogram(binwidth = 1) +
+  facet_wrap(~ ref_geo_area, nrow = 7)+
+  labs(
+    x = "Month",
+    y = "Patient Referrals Count",
+    fill = "Geographic Area",
+    title = "Histogram for 2022 Fetal Center Patient Referrals by states over Months"
+  )+
+  scale_y_continuous(name = "Patient Referrals Count", limits = c(0, 6), breaks = seq(0, 6, 2)) +
+  scale_x_discrete(breaks = seq(1, 12, 1), limits = as.character(1:12)) +
+  geom_vline(xintercept = seq(0.5, 12.5, 1), linetype = "dotted")  
+  
+ggplotly(p)
+
+# set plot size
+ggsave("Outputs/plots/Histogram_of_Patient_referrals.png", plot = p, width = 10, height = 10, units = "in")
+
+```
+
+
+
+
+### EXERCISE: Please create table of procedure counts over time (month) for the entire dataset. For each state which has referred a patient with a procedure, please create a separate table.
+
+### Table of procedure counts over time (month)
+
+```{r}
+
+# Table of procedure counts over months
+procedures_monthly_count <- df_joined %>%
+  group_by(month,month_name) %>%
+  summarise(Total_procedures = sum(across(starts_with("procedure_")), na.rm = TRUE),
+            ) %>%
+  arrange(desc(Total_procedures))
+  
+print('The number of Procedures in year 2022 or 1-12 months period are') 
+print(sum(procedures_monthly_count$Total_procedures))
+
+procedures_monthly_count
+
+```
+
+```{r}
+# Piechart to visually represent the name of the month and percentage 
+
+fig <- plot_ly(procedures_monthly_count, labels = ~month_name, values = ~Total_procedures, type = 'pie')
+fig <- fig %>% layout(title = 'Percentage and count of Procedures occured in months(1-12)',
+                      xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+                      yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))%>%
+  layout(xaxis = list(tickfont = list(size = 15)), yaxis = list(tickfont = list(size = 5)));
+
+fig
+
+```
+
+Hovering on the interactive pie chart provides the month name, percentage of procedure, number of procedures 
+
+
+For each state which has referred a patient with a procedure, please create a separate table.
+```{r}
+#  Table of procedure counts over time for each state
+
+procedures_state_count <- df_joined %>%
+  group_by(ref_state) %>%
+  summarise(Total_procedures = sum(across(starts_with("procedure_"), ~ ifelse(!is.na(.), 1, 0)))) 
+
+procedures_state_count
+
+```
+
+### Missing information Analysis
+
+Check the data where the state information is missing and view the redcap_event_name,redcap_repeat_instrument.
+```{r}
+# Select columns where ref_state column is NA
+missing_ref_state <- df_joined %>% 
+               filter(is.na(ref_state)) %>%
+                select(demo_id, redcap_event_name,redcap_repeat_instrument) %>%
+                arrange(demo_id)
+## Filtering data with redcap_repeat_instrument is not null:             
+missing_ref_state %>% filter(!is.na(redcap_repeat_instrument))
+```
+After filtering the dataset to exclude observations with missing state information, it was discovered that there are 20 procedures with missing state information, the majority of which belong to the minor_procedures_needle_based category (17 observations) and three from chorioangioma, laser_twins, and shunt.
+
+Furthermore, it was observed that the demo_id 627 has ten minor_procedure_needle_based procedures. This may indicate that the same patient had multiple minor_procedures_needle_based, or the data might be duplicated. It is recommended to further investigate the records to determine if this is an abnormality.
+
+### Missing Reference doctor for demo_id, redcap_event_name, redcap_repeat_instrument
+
+
+Check which Demo_id does not have demo_reference_doctor information in the data set.
+```{r}
+
+# Select columns where demo_ref_doc column is NA
+missing_ref_doc <- df_joined %>% 
+               filter(is.na(demo_ref_doc)) %>%
+                select(demo_id, redcap_event_name,redcap_repeat_instrument) %>%
+                arrange(demo_id)
+missing_ref_doc
+```
+In total, there are 13 missing data points for the redcap_event_name: demographic_data_arm_1. Additionally, there is 1 missing observation for redcap_event_name: operative_data_arm_1, which has minor_procedures_needle_based data. For demo_id 345, there are two observations in the dataset, both with redcap_event_name as demographic_data_arm_1. However, the value of demo_ref_doc is missing in both the observations. 
+
+
+Subsetting the time_series data and having the count of precedures data for particular date for later visualizing in details
+```{r}
+date_procedures <- df_joined %>%
+  group_by(demo_exam_date) %>%
+  summarise(Total_procedures = sum(across(starts_with("procedure_"), ~ ifelse(!is.na(.), 1, 0))))
+date_procedures
+```
+
+Further analysis is required to understand the occurrence of procedures in the dataset. A detailed exploration can be done by analyzing the time series data on 'demo_ref_date' and the total procedures that occurred on that particular date, which can be divided into monthly, 3-months, 6-months or yearly intervals. It is also possible to view the day of the week by hovering over the plot.
+
+This is a powerful tool for exploratory data analysis of time series data, allowing for detailed examination of the data after summarization. The slider present below the plot enables quick navigation to the required time frame.
+
+Clicking on 1m/3m/6m/YTD buttons provides a more detailed view of the data."
+```{r}
+# using high_chart to plot time_series data to view frequecy of procedures in detail.
+time_series <- xts(date_procedures$Total_procedures, order.by = as.Date(date_procedures$demo_exam_date));
+highchart(type = "stock") %>% 
+  hc_title(text = "Daily Procedure Occurrences in Time Series of Demo Exam Data") %>% 
+  hc_subtitle(text = "Frequency of Procedures Over Time 1m/3m/6m/Year") %>% 
+  hc_add_series(time_series) %>%
+  #hc_theme_sandsignika()
+  hc_add_theme(hc_theme_economist())
+```
+
+### Additional Procedure count in detail for state 8 with more geographical divisions
+
+As there is lot going on with State_8, it might be important to undersatnd the data in details with more divisions and have a table for later use.
+```{r}
+procedure_count_state8 <- df_joined %>%
+  filter(str_detect(ref_geo_area, "^8")) %>%
+  group_by(ref_geo_area) %>%
+  summarise(Total_procedures = sum(across(starts_with("procedure_"), ~ ifelse(!is.na(.), 1, 0)))) %>%
+  arrange(desc(Total_procedures))
+
+print(sum(procedure_count_state8$Total_procedures))
+procedure_count_state8
+```
+
+
+
+It is better to have the tables for single enitity or related events, writitng data into worksheets by creating a excel workbook and adding two sheets for  "Procedure Counts by Month" and "Procedure Counts by State"
+```{r}
+# Create a new workbook
+wb <- createWorkbook()
+
+# Add the tables as sheets in the workbook
+addWorksheet(wb, "Procedure Counts by Month")
+writeData(wb, "Procedure Counts by Month", procedures_monthly_count)
+addWorksheet(wb, "Procedure Counts by State")
+writeData(wb, "Procedure Counts by State", procedures_state_count)
+
+addWorksheet(wb, "Procedure Count State8")
+writeData(wb, "Procedure Count State8", procedure_count_state8)
+
+# Save the workbook as a CSV file
+saveWorkbook(wb, "Outputs/procedure_counts.xlsx", overwrite = TRUE)
+
+```
+
+
+## Possible Recommendations:
+
+Machine Learning Recommendations or approaches
+
+ - Cluster analysis - This could be used to group patients based on similar characteristics such as age, sex, procedure history, etc. This could help identify patterns in the data that may not be immediately obvious, and could inform decisions about which procedures to recommend to new patients.
+
+ - Classification algorithms - These could be used to predict the likelihood of a patient needing a certain procedure based on their demographic and medical history. For example, logistic regression could be used to predict the probability of needing a specific procedure based on age, sex, medical history, etc.
+
+ - Decision trees - These could be used to create a decision-making framework for recommending procedures based on a patient's medical history and current condition. This could be particularly useful for cases where there are multiple factors to consider, and where there is no clear consensus on the best course of action.
+
+ - Neural networks - These could be used to identify complex patterns in the data that may not be immediately apparent, and to make predictions based on these patterns. For example, a neural network could be used to predict the likelihood of a patient developing a certain condition based on their medical history.
+
+
+
+## Summary:
+
+1) Bar plot and histogram, faceted by the state where the referral came from (ref_state)
+    - 8_16 has the more number of doctor referals in the dataset every month in year 2022.
+    
+2) Table of procedure counts over time (month) for the entire dataset.
+    - In the year 2022: Top three months with highest procedure counts are: August: 92, June: 62, Oct: 62.
+    
+3) Table of each state which has referred a patient with a procedure. 
+    - State 8, 6 ,28 has highest procedure with 475, 17 and 15 respectively. and procedure for 20 observation is missing.
+    
+4) Missing Information analysis: 
+    - Checked which demo_id's referal_doctor id has been missing.
+    - Checked where the state information is missing for data with different procedures.
+    
+5) Piechart to visually represent the name of the month and percentage of procedures occured in 1-12 months.
+
+6) Procedure count in detail for state 8 which has more geographical divisions.
+
+7) Time-series plot for checking in procedures count over 1 / 3 / 6 months or yearly.
+      - More number of procedures occured during second half of the year from August - November.
+      
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
